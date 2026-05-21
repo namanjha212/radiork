@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Office Radio Hub</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        :root {
+            --bg: #0f172a; --panel: #1e293b; --accent: #38bdf8; --text: #f8fafc; --text-muted: #94a3b8;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+        .dashboard { max-width: 1000px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media(max-width: 768px) { .dashboard { grid-template-columns: 1fr; } }
+        .full-width { grid-column: 1 / -1; }
+        .card { background: var(--panel); padding: 24px; border-radius: 12px; border: 1px solid #334155; }
+        h1, h2, h3 { margin-top: 0; color: var(--text); }
+        h1 { font-size: 2rem; border-bottom: 2px solid #334155; padding-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+        input { background: #0f172a; border: 1px solid #475569; padding: 10px 14px; border-radius: 6px; color: white; width: calc(100% - 30px); margin-bottom: 12px; font-size: 0.95rem; }
+        button { background: var(--accent); color: #0f172a; font-weight: bold; border: none; padding: 10px 16px; border-radius: 6px; cursor: pointer; transition: opacity 0.2s; font-size: 0.95rem; }
+        button:hover { opacity: 0.9; }
+        .btn-secondary { background: transparent; border: 1px solid #475569; color: var(--text); margin-left: 5px; }
+        ul { list-style: none; padding: 0; margin: 0; max-height: 250px; overflow-y: auto; }
+        li { padding: 12px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; font-size: 0.95rem; }
+        .track-meta { color: var(--text-muted); font-size: 0.85rem; }
+        .now-playing-box { text-align: center; background: linear-gradient(135deg, #1e293b, #0f172a); border: 2px solid var(--accent); }
+        audio { margin-top: 15px; width: 100%; }
+        .tag { background: #334155; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; color: var(--accent); }
+    </style>
+</head>
+<body>
+
+    <header style="max-width: 1000px; margin: 0 auto 20px auto;">
+        <h1>📻 Central Office Radio Station</h1>
+    </header>
+
+    <div class="dashboard">
+        
+        <!-- MAIN PLAYER SCREEN -->
+        <div class="card full-width now-playing-box">
+            <span class="tag" id="playback-type">RADIO</span>
+            <h2 style="margin: 10px 0;" id="current-track-title">Loading Stream...</h2>
+            <audio id="global-audio" controls autoplay preload="auto"></audio>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0;">⚠️ Note: If sound doesn't play immediately, click anywhere on the page to authorize browser playback permissions.</p>
+        </div>
+
+        <!-- REQ 1: LIVE GLOBAL STATIONS -->
+        <div class="card">
+            <h3>1. Live Radio Tuning</h3>
+            <input type="text" id="radio-input" placeholder="Search Style (e.g. Lofi, Rock, Jazz, BBC)...">
+            <button onclick="searchRadioStations()">Find Stations</button>
+            <ul id="radio-results" style="margin-top: 15px;"></ul>
+        </div>
+
+        <!-- REQ 2: COLLABORATIVE SONG QUEUE -->
+        <div class="card">
+            <h3>2. Shared Jukebox Queue</h3>
+            <input type="text" id="song-title-input" placeholder="Song Title">
+            <input type="text" id="song-url-input" placeholder="Direct Audio File link (.mp3, .aac)">
+            <button onclick="submitTrackToQueue()">Add Song</button>
+            
+            <h4 style="margin: 20px 0 10px 0; border-top: 1px solid #334155; padding-top: 15px;">Upcoming Tracklist Queue:</h4>
+            <ul id="queue-list"></ul>
+        </div>
+
+        <!-- REQ 3: STAFF PLAYLIST ARCHIVE -->
+        <div class="card full-width">
+            <h3>3. Staff Playlist Creator & Vault</h3>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="playlist-name-input" placeholder="Name your playlist (e.g. Coding Focus Vibe)" style="margin-bottom: 0;">
+                <button onclick="createPlaylistFromQueue()">Save Active Queue As Playlist</button>
+            </div>
+            <h4 style="margin-top: 20px;">Saved Playlists Available for the Office:</h4>
+            <ul id="playlist-vault"></ul>
+        </div>
+
+    </div>
+
+    <script>
+        const socket = io();
+        const audioNode = document.getElementById('global-audio');
+        const titleNode = document.getElementById('current-track-title');
+        const typeNode = document.getElementById('playback-type');
+        let currentTrackType = 'radio';
+
+        // Listeners for backend real-time broadcast pushes
+        socket.on('sync-playback', (track) => {
+            currentTrackType = track.type;
+            titleNode.innerText = track.title;
+            typeNode.innerText = track.type.toUpperCase();
+            
+            if (audioNode.src !== track.url) {
+                audioNode.src = track.url;
+                audioNode.play().catch(() => {
+                    console.log("Browser policy blocked instant autoplay. Awaiting first manual gesture.");
+                });
+            }
+        });
+
+        // Automatically cycle queue forward if a standalone file ends
+        audioNode.onended = () => {
+            if (currentTrackType === 'song') {
+                socket.emit('song-finished');
+            }
+        };
+
+        socket.on('update-queue', (queue) => {
+            const queueList = document.getElementById('queue-list');
+            if (queue.length === 0) {
+                queueList.innerHTML = `<li class="track-meta">Queue empty. Plays radio when done.</li>`;
+                return;
+            }
+            queueList.innerHTML = queue.map(t => `<li><span>${t.title}</span><span class="track-meta">Added by User</span></li>`).join('');
+        });
+
+        socket.on('update-playlists', (playlists) => {
+            const vault = document.getElementById('playlist-vault');
+            const keys = Object.keys(playlists);
+            if (keys.length === 0) {
+                vault.innerHTML = `<li class="track-meta">No team playlists built yet.</li>`;
+                return;
+            }
+            vault.innerHTML = keys.map(k => `
+                <li>
+                    <div><strong>${k}</strong> <span class="track-meta">(${playlists[k].length} songs)</span></div>
+                    <button class="btn-secondary" onclick="triggerPlaylistLoad('${k.replace(/'/g, "\\'")}')">Inject Into Live Stream</button>
+                </li>
+            `).join('');
+        });
+
+        // Search Action Logic (Radio Browser API Endpoint)
+        async function searchRadioStations() {
+            const input = document.getElementById('radio-input').value;
+            if (!input) return;
+            const container = document.getElementById('radio-results');
+            container.innerHTML = `<li class="track-meta">Scanning waves...</li>`;
+
+            try {
+                const response = await fetch(`https://de1.api.radio-browser.info/json/stations/byname/${encodeURIComponent(input)}?limit=6`);
+                const collection = await response.json();
+                
+                if(collection.length === 0) {
+                    container.innerHTML = `<li class="track-meta">No matching stations found.</li>`;
+                    return;
+                }
+
+                container.innerHTML = collection.map(station => {
+                    const cleanName = station.name.replace(/'/g, "\\'");
+                    return `
+                        <li>
+                            <div>${station.name} <br/><span class="track-meta">${station.tags || 'General'}</span></div>
+                            <button onclick="broadcastTrackSelection('${station.url_resolved}', '${cleanName}', 'radio')">Tune In</button>
+                        </li>
+                    `;
+                }).join('');
+            } catch (err) {
+                container.innerHTML = `<li class="track-meta" style="color:red;">API lookup failed. Try searching again.</li>`;
+            }
+        }
+
+        function broadcastTrackSelection(url, title, type) {
+            socket.emit('change-track', { url, title, type });
+        }
+
+        function submitTrackToQueue() {
+            const titleInput = document.getElementById('song-title-input');
+            const urlInput = document.getElementById('song-url-input');
+            if (!urlInput.value || !titleInput.value) return alert("Fill out both Title and URL fields.");
+
+            socket.emit('add-to-queue', { url: urlInput.value, title: titleInput.value, type: 'song' });
+            urlInput.value = ''; titleInput.value = '';
+        }
+
+        // Playlist State Submissions
+        let localQueueSnapshot = [];
+        socket.on('update-queue', (q) => { localQueueSnapshot = q; });
+
+        function createPlaylistFromQueue() {
+            const input = document.getElementById('playlist-name-input');
+            if (!input.value) return alert("Give your playlist a title.");
+            if (localQueueSnapshot.length === 0) return alert("The live queue must contain songs first to build a copy playlist!");
+
+            socket.emit('save-playlist', { name: input.value, tracks: localQueueSnapshot });
+            input.value = '';
+        }
+
+        function triggerPlaylistLoad(name) {
+            socket.emit('load-playlist', name);
+        }
+    </script>
+</body>
+</html>

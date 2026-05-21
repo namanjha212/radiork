@@ -1,0 +1,14 @@
+{
+  "name": "office-radio",
+  "version": "1.0.0",
+  "description": "Collaborative private office radio station",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.2",
+    "node-fetch": "^3.3.2",
+    "socket.io": "^4.8.3"
+  }
+}
