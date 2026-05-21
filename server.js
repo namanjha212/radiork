@@ -1,22 +1,21 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const path = require('path');
+const path = require('path'); // <-- Make sure this line is present!
 
 const app = express();
 const server = http.createServer(app);
 
-// Enable CORS so staff can connect seamlessly across different devices
 const io = new Server(server, {
     cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// Explicitly serve static assets out of the local public directory folder
-app.use(express.static(path.resolve(__dirname, 'public')));
+// 1. Tell Express to cleanly resolve the absolute path to your 'public' folder
+app.use(express.static(path.join(__dirname)));
 
-// Optional routing handler to ensure index.html serves cleanly 
+// 2. Add an explicit fallback routing command for the homepage index
 app.get('/', (req, res) => {
-    res.sendFile(path.resolve(__dirname, 'public', 'index.html'));
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // Central Global App State Container
